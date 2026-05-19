@@ -1,0 +1,253 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --jarvis-primary: #00d9ff;
+  --jarvis-secondary: #0088cc;
+  --jarvis-glow: rgba(0, 217, 255, 0.5);
+  --jarvis-glow-strong: rgba(0, 217, 255, 0.8);
+  --glass-bg: rgba(10, 25, 47, 0.75);
+  --glass-bg-dark: rgba(5, 14, 26, 0.85);
+  --glass-border: rgba(0, 217, 255, 0.2);
+  --glass-border-hover: rgba(0, 217, 255, 0.4);
+  --text-primary: #e0f7ff;
+  --text-muted: #6b9ab8;
+  --danger: #ff4444;
+  --warning: #ffaa00;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Courier New', monospace;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+/* ── Glassmorphism ── */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 32px rgba(0, 217, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.glass-dark {
+  background: var(--glass-bg-dark);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border);
+}
+
+/* ── Glow Effects ── */
+.glow-text {
+  color: var(--jarvis-primary);
+  text-shadow: 0 0 10px var(--jarvis-glow), 0 0 20px rgba(0, 217, 255, 0.3);
+}
+
+.glow-border {
+  border-color: var(--jarvis-primary);
+  box-shadow: 0 0 15px var(--jarvis-glow), inset 0 0 15px rgba(0, 217, 255, 0.05);
+}
+
+.glow-btn {
+  background: rgba(0, 217, 255, 0.1);
+  border: 1px solid var(--glass-border);
+  color: var(--jarvis-primary);
+  transition: all 0.2s ease;
+}
+
+.glow-btn:hover {
+  background: rgba(0, 217, 255, 0.2);
+  border-color: var(--jarvis-primary);
+  box-shadow: 0 0 20px var(--jarvis-glow);
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 217, 255, 0.3);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 217, 255, 0.6);
+}
+
+/* ── Drag Region ── */
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* ── Animations ── */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px var(--jarvis-glow); }
+  50% { box-shadow: 0 0 40px var(--jarvis-glow-strong), 0 0 60px rgba(0, 217, 255, 0.3); }
+}
+
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+@keyframes typing-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes ripple {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+@keyframes bar-dance {
+  0%, 100% { transform: scaleY(0.2); }
+  50% { transform: scaleY(1); }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-ripple {
+  animation: ripple 1.5s ease-out infinite;
+}
+
+.cursor-blink::after {
+  content: '|';
+  animation: typing-cursor 1s step-end infinite;
+  color: var(--jarvis-primary);
+}
+
+/* ── HUD Frame ── */
+.hud-frame {
+  position: relative;
+}
+
+.hud-frame::before,
+.hud-frame::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-color: var(--jarvis-primary);
+  border-style: solid;
+  opacity: 0.7;
+}
+
+.hud-frame::before {
+  top: 0;
+  left: 0;
+  border-width: 2px 0 0 2px;
+}
+
+.hud-frame::after {
+  bottom: 0;
+  right: 0;
+  border-width: 0 2px 2px 0;
+}
+
+/* ── Status Badge ── */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.status-online {
+  background: rgba(0, 217, 255, 0.1);
+  border: 1px solid rgba(0, 217, 255, 0.3);
+  color: var(--jarvis-primary);
+}
+
+.status-offline {
+  background: rgba(255, 68, 68, 0.1);
+  border: 1px solid rgba(255, 68, 68, 0.3);
+  color: var(--danger);
+}
+
+.status-listening {
+  background: rgba(0, 255, 136, 0.1);
+  border: 1px solid rgba(0, 255, 136, 0.3);
+  color: #00ff88;
+}
+
+.status-thinking {
+  background: rgba(170, 100, 255, 0.1);
+  border: 1px solid rgba(170, 100, 255, 0.3);
+  color: #aa64ff;
+}
+
+/* ── Risk Badges ── */
+.risk-critical {
+  background: rgba(255, 68, 68, 0.15);
+  border: 1px solid rgba(255, 68, 68, 0.4);
+  color: #ff6b6b;
+}
+
+.risk-elevated {
+  background: rgba(255, 170, 0, 0.15);
+  border: 1px solid rgba(255, 170, 0, 0.4);
+  color: #ffcc44;
+}
+
+.risk-standard {
+  background: rgba(0, 217, 255, 0.1);
+  border: 1px solid rgba(0, 217, 255, 0.3);
+  color: var(--jarvis-primary);
+}
+
+/* ── Message Bubbles ── */
+.msg-user {
+  background: rgba(0, 217, 255, 0.08);
+  border-left: 2px solid var(--jarvis-primary);
+}
+
+.msg-assistant {
+  background: rgba(5, 14, 26, 0.6);
+  border-left: 2px solid rgba(0, 217, 255, 0.3);
+}
+
+/* ── Input Field ── */
+.jarvis-input {
+  background: rgba(0, 217, 255, 0.05);
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  caret-color: var(--jarvis-primary);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.jarvis-input:focus {
+  border-color: rgba(0, 217, 255, 0.5);
+  box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.1);
+}
+
+.jarvis-input::placeholder {
+  color: var(--text-muted);
+}
