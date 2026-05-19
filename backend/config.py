@@ -25,14 +25,19 @@ class Config:
     SILENCE_THRESHOLD: float = 0.01
     SILENCE_DURATION: float = 2.0  # seconds before auto-stop
 
-    # Audio Device Selection (None = use Windows default)
-    # Run: python -c "import sounddevice as sd; print(sd.query_devices())" to list
+    # Audio Device Selection
+    # AUDIO_INPUT_DEVICE  = index number (use sounddevice list) or blank for Windows default
+    # AUDIO_OUTPUT_DEVICE = index number, or "MCI" to use Windows default via MCI player
     AUDIO_INPUT_DEVICE: int | None = (
-        int(os.getenv("AUDIO_INPUT_DEVICE")) if os.getenv("AUDIO_INPUT_DEVICE", "").strip() else None
+        int(os.getenv("AUDIO_INPUT_DEVICE"))
+        if os.getenv("AUDIO_INPUT_DEVICE", "").strip().isdigit() else None
     )
+    # "MCI" means: skip sounddevice, use Windows MCI (goes to Windows default output device)
+    _out_raw: str = os.getenv("AUDIO_OUTPUT_DEVICE", "").strip()
     AUDIO_OUTPUT_DEVICE: int | None = (
-        int(os.getenv("AUDIO_OUTPUT_DEVICE")) if os.getenv("AUDIO_OUTPUT_DEVICE", "").strip() else None
+        int(_out_raw) if _out_raw.isdigit() else None
     )
+    USE_MCI_OUTPUT: bool = (_out_raw.upper() == "MCI" or not _out_raw)
 
     # Timezone for greetings
     TIMEZONE: str = os.getenv("TIMEZONE", "America/Toronto")

@@ -22,10 +22,26 @@ except ImportError:
     logger.warning("Whisper not available — STT disabled")
 
 
-# ─── Windows MCI audio playback (built-in, handles mp3/wav) ─────────────────
+# ─── Audio playback — MP3 → PCM → sounddevice (device-aware) ────────────────
+
+def _play_on_device(path: str, device_index) -> None:
+    """Decode MP3/WAV and play through a specific sounddevice output device."""
+    try:
+        import miniaudio
+        # Decode to 16-bit PCM at 44100 Hz stereo
+        decoded = miniaudio.decode_file(path, output_format=miniaudio.SampleFormat.SIGNED16,
+                                        nchannels=2, sample_rate=44100)
+        samples = np.frombuffer(decoded.samples, dtype=np.int16).reshape(-1, 2)
+        audio_float = samples.astype(np.float32) / 32768.0
+        sd.play(audio_float, samplerate=44100, device=device_index, blocking=True)
+        sd.stop()
+    except Exception as e:
+        logger.warning(f"sounddevice playback failed ({e}), falling back to MCI")
+        _mci_play(path)
+
 
 def _mci_play(path: str) -> None:
-    """Play audio via Windows MCI — no external dependencies, handles mp3."""
+    """Fallback: play audio via Windows MCI (uses Windows default output)."""
     winmm = ctypes.windll.winmm
     path = os.path.abspath(path).replace("/", "\\")
     alias = "jarvis_snd"
@@ -96,7 +112,10 @@ class VoiceHandler:
                     break
                 try:
                     self.is_playing = True
-                    _mci_play(audio_path)
+                    if config.USE_MCI_OUTPUT:
+                        _mci_play(audio_path)
+                    else:
+                        _play_on_device(audio_path, config.AUDIO_OUTPUT_DEVICE)
                     self.is_playing = False
                 except Exception as e:
                     logger.error(f"Playback error: {e}")
