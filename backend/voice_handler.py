@@ -1,14 +1,11 @@
 import asyncio
-import io
+import ctypes
 import os
 import queue
-import subprocess
 import tempfile
 import threading
 import time
-import wave
-from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional
 
 import numpy as np
 import sounddevice as sd
@@ -25,6 +22,22 @@ except ImportError:
     logger.warning("Whisper not available — STT disabled")
 
 
+# ─── Windows MCI audio playback (built-in, handles mp3/wav) ─────────────────
+
+def _mci_play(path: str) -> None:
+    """Play audio via Windows MCI — no external dependencies, handles mp3."""
+    winmm = ctypes.windll.winmm
+    path = os.path.abspath(path).replace("/", "\\")
+    alias = "jarvis_snd"
+    winmm.mciSendStringW(f'open "{path}" alias {alias}', None, 0, None)
+    err = winmm.mciSendStringW(f"play {alias} wait", None, 0, None)
+    winmm.mciSendStringW(f"close {alias}", None, 0, None)
+    if err:
+        logger.warning(f"MCI playback error code: {err}")
+
+
+# ─── Audio Visualizer ────────────────────────────────────────────────────────
+
 class AudioVisualizer:
     def __init__(self):
         self.current_level: float = 0.0
@@ -34,7 +47,6 @@ class AudioVisualizer:
     def update(self, audio_chunk: np.ndarray):
         rms = float(np.sqrt(np.mean(audio_chunk.astype(np.float32) ** 2)))
         normalized = min(rms / 3000.0, 1.0)
-
         with self._lock:
             self.current_level = normalized
             self.bars = [
@@ -47,17 +59,34 @@ class AudioVisualizer:
             return {"level": self.current_level, "bars": self.bars.copy()}
 
 
+# ─── Main VoiceHandler ───────────────────────────────────────────────────────
+
 class VoiceHandler:
     def __init__(self):
         self.whisper_model = None
         self.is_recording = False
         self.is_playing = False
-        self.audio_queue: queue.Queue = queue.Queue()
         self.visualizer = AudioVisualizer()
         self.recording_thread: Optional[threading.Thread] = None
+        self.audio_frames: list = []
         self.playback_queue: queue.Queue = queue.Queue()
-        self.playback_thread: Optional[threading.Thread] = None
         self._start_playback_worker()
+        self._log_audio_devices()
+
+    # ── Device Discovery ─────────────────────────────────────────────────────
+
+    def _log_audio_devices(self):
+        """Log available audio devices so the user can pick one."""
+        devices = sd.query_devices()
+        logger.info("Available audio input devices:")
+        for i, d in enumerate(devices):
+            if d["max_input_channels"] > 0:
+                marker = " ◀ SELECTED" if i == config.AUDIO_INPUT_DEVICE else ""
+                logger.info(f"  [{i}] {d['name']}{marker}")
+        if config.AUDIO_INPUT_DEVICE is None:
+            logger.info("  Using system default input device")
+
+    # ── Playback Worker ───────────────────────────────────────────────────────
 
     def _start_playback_worker(self):
         def worker():
@@ -66,21 +95,26 @@ class VoiceHandler:
                 if audio_path is None:
                     break
                 try:
-                    self._play_audio_file(audio_path)
+                    self.is_playing = True
+                    _mci_play(audio_path)
+                    self.is_playing = False
                 except Exception as e:
                     logger.error(f"Playback error: {e}")
+                    self.is_playing = False
                 finally:
                     self.playback_queue.task_done()
-                    if os.path.exists(audio_path) and "tmp" in audio_path:
-                        try:
+                    try:
+                        if os.path.exists(audio_path):
                             os.unlink(audio_path)
-                        except Exception:
-                            pass
+                    except Exception:
+                        pass
 
-        self.playback_thread = threading.Thread(target=worker, daemon=True)
-        self.playback_thread.start()
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
 
-    def load_whisper_model(self):
+    # ── Whisper Model ─────────────────────────────────────────────────────────
+
+    def load_whisper_model(self) -> bool:
         if not WHISPER_AVAILABLE:
             logger.error("Whisper package not installed")
             return False
@@ -92,6 +126,8 @@ class VoiceHandler:
         except Exception as e:
             logger.error(f"Failed to load Whisper model: {e}")
             return False
+
+    # ── Recording ─────────────────────────────────────────────────────────────
 
     def start_recording(self) -> bool:
         if self.is_recording:
@@ -109,22 +145,24 @@ class VoiceHandler:
         self.is_recording = False
         if self.recording_thread:
             self.recording_thread.join(timeout=3.0)
-        if not hasattr(self, "audio_frames") or not self.audio_frames:
+        if not self.audio_frames:
             return None
         audio_data = np.concatenate(self.audio_frames, axis=0)
-        logger.info(f"Recording stopped. Duration: {len(audio_data) / config.SAMPLE_RATE:.2f}s")
+        logger.info(f"Recording stopped — {len(audio_data)/config.SAMPLE_RATE:.2f}s captured")
         return audio_data
 
     def _record_audio(self):
+        silence_threshold = config.SILENCE_THRESHOLD * 32768
+        silence_needed = int(config.SILENCE_DURATION * config.SAMPLE_RATE / config.CHUNK_SIZE)
+        silence_count = 0
         frames = []
-        silence_frames = 0
-        silence_threshold_frames = int(config.SILENCE_DURATION * config.SAMPLE_RATE / config.CHUNK_SIZE)
 
         def callback(indata, frame_count, time_info, status):
             if status:
-                logger.warning(f"Audio input status: {status}")
+                logger.debug(f"Audio status: {status}")
             frames.append(indata.copy())
-            self.visualizer.update(indata[:, 0] if indata.ndim > 1 else indata)
+            chunk = indata[:, 0] if indata.ndim > 1 else indata
+            self.visualizer.update(chunk)
 
         try:
             with sd.InputStream(
@@ -133,129 +171,124 @@ class VoiceHandler:
                 dtype=np.int16,
                 blocksize=config.CHUNK_SIZE,
                 callback=callback,
+                device=config.AUDIO_INPUT_DEVICE,
             ):
                 while self.is_recording:
                     time.sleep(0.01)
-
                     if frames:
-                        recent = frames[-1].flatten().astype(np.float32)
-                        rms = np.sqrt(np.mean(recent ** 2))
-                        if rms < config.SILENCE_THRESHOLD * 32768:
-                            silence_frames += 1
+                        rms = np.sqrt(np.mean(frames[-1].astype(np.float32) ** 2))
+                        if rms < silence_threshold:
+                            silence_count += 1
                         else:
-                            silence_frames = 0
-
-                        if silence_frames >= silence_threshold_frames:
-                            logger.info("Silence detected — auto-stopping recording")
+                            silence_count = 0
+                        if silence_count >= silence_needed:
+                            logger.info("Silence detected — auto-stopping")
                             self.is_recording = False
-                            break
-
         except Exception as e:
             logger.error(f"Recording error: {e}")
         finally:
             self.audio_frames = frames
 
+    # ── Transcription ─────────────────────────────────────────────────────────
+
     async def transcribe(self, audio_data: np.ndarray) -> str:
         if self.whisper_model is None:
             if not self.load_whisper_model():
                 return ""
-
         try:
             loop = asyncio.get_event_loop()
-            text = await loop.run_in_executor(None, self._transcribe_sync, audio_data)
-            return text
+            return await loop.run_in_executor(None, self._transcribe_sync, audio_data)
         except Exception as e:
             logger.error(f"Transcription error: {e}")
             return ""
 
     def _transcribe_sync(self, audio_data: np.ndarray) -> str:
-        audio_float = audio_data.astype(np.float32) / 32768.0
-        if audio_float.ndim > 1:
-            audio_float = audio_float.mean(axis=1)
-
-        result = self.whisper_model.transcribe(audio_float, language="en", fp16=False)
+        audio = audio_data.astype(np.float32) / 32768.0
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+        result = self.whisper_model.transcribe(audio, language="en", fp16=False)
         text = result["text"].strip()
         logger.info(f"Transcription: {text}")
         return text
 
+    # ── TTS ───────────────────────────────────────────────────────────────────
+
     async def speak(self, text: str) -> bool:
+        if not text.strip():
+            return False
         try:
-            audio_path = await asyncio.get_event_loop().run_in_executor(
-                None, self._synthesize_speech, text
-            )
+            audio_path = await self._synthesize(text)
             if audio_path:
                 self.playback_queue.put(audio_path)
                 return True
-            return False
         except Exception as e:
             logger.error(f"TTS error: {e}")
-            return False
+        return False
 
-    def _synthesize_speech(self, text: str) -> Optional[str]:
-        piper_exe = config.PIPER_DIR / "piper.exe"
-        voice_model = config.PIPER_DIR / f"{config.PIPER_VOICE}.onnx"
+    async def _synthesize(self, text: str) -> Optional[str]:
+        """Try edge-tts first (JARVIS voice), fall back to Windows SAPI."""
+        # Strip markdown / command prefixes before speaking
+        clean = text.replace("**", "").replace("*", "").replace("`", "")
+        for prefix in ["CMD:", "FILE_SEARCH:"]:
+            if prefix in clean:
+                clean = clean.split(prefix)[0].strip()
+        clean = clean[:600]  # cap length for voice output
 
-        if not piper_exe.exists():
-            logger.warning("Piper TTS not found — using system TTS fallback")
-            return self._windows_tts_fallback(text)
+        path = await self._edge_tts(clean)
+        if path:
+            return path
+        return await asyncio.get_event_loop().run_in_executor(None, self._windows_tts, clean)
 
+    async def _edge_tts(self, text: str) -> Optional[str]:
+        """High-quality JARVIS voice using Microsoft Edge neural TTS."""
         try:
-            tmp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-            tmp_path = tmp_file.name
-            tmp_file.close()
+            import edge_tts
+            tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+            tmp.close()
 
-            proc = subprocess.run(
-                [str(piper_exe), "--model", str(voice_model), "--output_file", tmp_path],
-                input=text,
-                capture_output=True,
-                text=True,
-                timeout=30,
+            communicate = edge_tts.Communicate(
+                text,
+                voice="en-GB-RyanNeural",   # British male — closest to JARVIS
+                rate="+8%",                  # slightly faster, more efficient
+                pitch="-8Hz",                # slightly deeper, more authoritative
+                volume="+0%",
             )
+            await communicate.save(tmp.name)
 
-            if proc.returncode == 0 and os.path.exists(tmp_path):
-                return tmp_path
-            else:
-                logger.error(f"Piper TTS failed: {proc.stderr}")
-                return self._windows_tts_fallback(text)
-
+            if os.path.exists(tmp.name) and os.path.getsize(tmp.name) > 1000:
+                logger.info(f"Edge-TTS OK ({len(text)} chars)")
+                return tmp.name
+            os.unlink(tmp.name)
         except Exception as e:
-            logger.error(f"Piper TTS error: {e}")
-            return self._windows_tts_fallback(text)
+            logger.warning(f"Edge-TTS unavailable: {e}")
+        return None
 
-    def _windows_tts_fallback(self, text: str) -> Optional[str]:
+    def _windows_tts(self, text: str) -> Optional[str]:
+        """Fallback: Windows SAPI TTS → WAV → MCI playback."""
+        import subprocess
         try:
-            tmp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-            tmp_path = tmp_file.name
-            tmp_file.close()
-
-            ps_script = f"""
-Add-Type -AssemblyName System.Speech
-$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
-$synth.SetOutputToWaveFile('{tmp_path}')
-$synth.Speak('{text.replace("'", "")}')
-$synth.Dispose()
-"""
-            subprocess.run(
-                ["powershell.exe", "-NoProfile", "-Command", ps_script],
-                capture_output=True,
-                timeout=30,
+            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            tmp.close()
+            safe = text.replace("'", "").replace('"', "")
+            script = (
+                f"Add-Type -AssemblyName System.Speech; "
+                f"$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                f"$s.Rate = 1; "
+                f"$s.SetOutputToWaveFile('{tmp.name}'); "
+                f"$s.Speak('{safe}'); "
+                f"$s.Dispose()"
             )
-            if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
-                return tmp_path
+            subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command", script],
+                capture_output=True, timeout=30,
+            )
+            if os.path.exists(tmp.name) and os.path.getsize(tmp.name) > 0:
+                return tmp.name
         except Exception as e:
             logger.error(f"Windows TTS fallback error: {e}")
         return None
 
-    def _play_audio_file(self, audio_path: str):
-        try:
-            data, samplerate = sf.read(audio_path)
-            self.is_playing = True
-            sd.play(data, samplerate)
-            sd.wait()
-            self.is_playing = False
-        except Exception as e:
-            logger.error(f"Audio playback error: {e}")
-            self.is_playing = False
+    # ── Status ────────────────────────────────────────────────────────────────
 
     def get_visualizer_state(self) -> dict:
         return self.visualizer.get_state()

@@ -2,6 +2,7 @@ fastapi==0.115.12
 uvicorn[standard]==0.34.3
 anthropic==0.52.0
 openai-whisper==20250625
+edge-tts==7.2.8
 sounddevice==0.5.1
 soundfile==0.13.1
 psutil==7.0.0

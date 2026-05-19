@@ -51,6 +51,12 @@ export const jarvisApi = {
   systemStatus: () => api.get("/api/system/status"),
   systemProcesses: (n = 10) => api.get("/api/system/processes", { params: { n } }),
   systemNetwork: () => api.get("/api/system/network"),
+
+  // Greeting
+  greet: () => api.get("/api/greet"),
+
+  // Audio devices
+  audioDevices: () => api.get("/api/audio/devices"),
 };
 
 export function createWebSocket(onMessage, onOpen, onClose) {

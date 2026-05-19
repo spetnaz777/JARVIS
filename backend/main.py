@@ -318,6 +318,61 @@ async def health():
     }
 
 
+# ─── Greeting Endpoint ────────────────────────────────────────────────────────
+
+@app.get("/api/greet")
+async def greet():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(config.TIMEZONE)
+    now = datetime.now(tz)
+    hour = now.hour
+
+    if 5 <= hour < 12:
+        time_phrase = "Good morning"
+        followup = "I hope you slept well. What shall we get done today?"
+    elif 12 <= hour < 17:
+        time_phrase = "Good afternoon"
+        followup = "How has your day been so far?"
+    elif 17 <= hour < 22:
+        time_phrase = "Good evening"
+        followup = "How was your day, sir?"
+    else:
+        time_phrase = "Good evening"
+        followup = "Burning the midnight oil, are we? How can I help?"
+
+    greeting = f"{time_phrase}, sir. {followup}"
+    return {
+        "greeting": greeting,
+        "time_phrase": time_phrase,
+        "hour": hour,
+        "timezone": config.TIMEZONE,
+    }
+
+
+# ─── Audio Device List ────────────────────────────────────────────────────────
+
+@app.get("/api/audio/devices")
+async def list_audio_devices():
+    import sounddevice as sd
+    devices = sd.query_devices()
+    inputs = [
+        {"index": i, "name": d["name"], "channels": d["max_input_channels"]}
+        for i, d in enumerate(devices) if d["max_input_channels"] > 0
+    ]
+    outputs = [
+        {"index": i, "name": d["name"], "channels": d["max_output_channels"]}
+        for i, d in enumerate(devices) if d["max_output_channels"] > 0
+    ]
+    return {
+        "inputs": inputs,
+        "outputs": outputs,
+        "current_input": config.AUDIO_INPUT_DEVICE,
+        "current_output": config.AUDIO_OUTPUT_DEVICE,
+    }
+
+
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",

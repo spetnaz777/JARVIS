@@ -25,6 +25,18 @@ class Config:
     SILENCE_THRESHOLD: float = 0.01
     SILENCE_DURATION: float = 2.0  # seconds before auto-stop
 
+    # Audio Device Selection (None = use Windows default)
+    # Run: python -c "import sounddevice as sd; print(sd.query_devices())" to list
+    AUDIO_INPUT_DEVICE: int | None = (
+        int(os.getenv("AUDIO_INPUT_DEVICE")) if os.getenv("AUDIO_INPUT_DEVICE", "").strip() else None
+    )
+    AUDIO_OUTPUT_DEVICE: int | None = (
+        int(os.getenv("AUDIO_OUTPUT_DEVICE")) if os.getenv("AUDIO_OUTPUT_DEVICE", "").strip() else None
+    )
+
+    # Timezone for greetings
+    TIMEZONE: str = os.getenv("TIMEZONE", "America/Toronto")
+
     # Claude Settings
     CLAUDE_MODEL: str = "claude-sonnet-4-5"
     MAX_HISTORY: int = 10

@@ -38,6 +38,7 @@ export default function HUD() {
   const pollingRef = useRef(null);
   const vizPollRef = useRef(null);
   const rememberedCommands = useRef(new Set());
+  const hasGreeted = useRef(false);
 
   // Backend health check
   const checkBackend = useCallback(async () => {
@@ -49,6 +50,27 @@ export default function HUD() {
       setState("offline");
     }
   }, []);
+
+  // Startup greeting — fires once when backend first comes online
+  useEffect(() => {
+    if (!backendOnline || hasGreeted.current) return;
+    hasGreeted.current = true;
+
+    const doGreet = async () => {
+      try {
+        await new Promise((r) => setTimeout(r, 800)); // brief init delay
+        const res = await jarvisApi.greet();
+        const { greeting } = res.data;
+        setMessages([{ id: 0, role: "assistant", content: greeting, timestamp: Date.now() }]);
+        setState("speaking");
+        await jarvisApi.voiceSpeak(greeting);
+        setState("idle");
+      } catch (e) {
+        console.error("Greeting error:", e);
+      }
+    };
+    doGreet();
+  }, [backendOnline]);
 
   useEffect(() => {
     checkBackend();
